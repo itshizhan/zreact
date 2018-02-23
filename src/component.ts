@@ -43,12 +43,12 @@ export class Component <PropsType extends IBaseProps, StateType extends IKeyValu
     /**
      * react render 16 多node支持
      */
-    public _children?: IComponentChild[];
+    public _children: IComponentChild[];
 
     /**
      * 被移除时的vdom缓存
      */
-    public _nextVDom?: IVDom;
+    public _nextVDom?: IVDom|IVDom[];
 
     /**
      * 上一次的属性
@@ -66,14 +66,9 @@ export class Component <PropsType extends IBaseProps, StateType extends IKeyValu
     public _prevContext?: IKeyValue;
 
     /**
-     * 绑定了this的
-     */
-    // public _h?: typeof h;
-
-    /**
      * 子组件
      */
-    public _component?: Component<IBaseProps, IKeyValue>;
+    public _component?: Component<IBaseProps, IKeyValue>| Array<Component<IBaseProps, IKeyValue>>;
 
     /**
      * 父组件
@@ -128,7 +123,7 @@ export class Component <PropsType extends IBaseProps, StateType extends IKeyValu
     /**
      * 组件挂载后的vdom
      */
-    public _vdom?: IVDom;
+    public _vdom?: IVDom|IVDom[];
 
     /**
      *
@@ -141,6 +136,7 @@ export class Component <PropsType extends IBaseProps, StateType extends IKeyValu
         this.context = context;
         this.props = props;
         this.state = {} as StateType;
+        this._children = [];
         // const self: any = this;
         // this.state = self.state || {} as StateType;
         // if (options.eventBind) {
@@ -256,6 +252,6 @@ export class Component <PropsType extends IBaseProps, StateType extends IKeyValu
      * @param state
      * @param context
      */
-    public render(props: PropsType, state: StateType, context: IKeyValue): childType {
+    public render(props: PropsType, state: StateType, context: IKeyValue): childType|childType[] {
     }
 }

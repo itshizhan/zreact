@@ -318,7 +318,7 @@ function diffChildren(
                 pchild = null;
             } else {
                 pchild = (originalChildren as NodeList)[i];
-                pvdom = pchild && findVDom(pchild);
+                pvdom = pchild && findVDom(pchild) as IVDom;
             }
             const props = pvdom && pvdom.props;
             let key: string | undefined | number;
@@ -388,7 +388,7 @@ function diffChildren(
                     vdom.base.appendChild(pchild.base);
                 } else if (f && pchild.base === f.nextSibling) {
                     // 处理组件卸载生命周期
-                    const fvdom = findVDom(f as any);
+                    const fvdom = findVDom(f as any) as IVDom;
                     if ( fvdom && fvdom.component) {
                         offset ++;
                     } else {

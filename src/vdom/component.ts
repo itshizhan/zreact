@@ -5,8 +5,8 @@ import { VNode } from "../vnode";
 import { createComponent, collectComponent } from "./component-recycler";
 import { getNodeProps, setRef } from "./index";
 import { removeNode } from "../dom/index";
-import { extend } from "../util";
-import { IKeyValue, childType, IReactContext, IReactProvider } from "../types";
+import { extend, isArray } from "../util";
+import { IKeyValue, childType, IReactContext, IReactProvider, IBaseProps } from "../types";
 import { IVDom } from "./index";
 import { findVDom, setVDom, findVoidNode, setVoidNode } from "../find";
 import {
@@ -101,6 +101,187 @@ export function setComponentProps(component: Component<IKeyValue, IKeyValue>, pr
     setRef(component._ref, component);
 }
 
+function diffRender(
+    component: Component<IBaseProps, IKeyValue>,
+    context: IKeyValue,
+    rendered: childType|childType[],
+    opts: number,
+    mountALL: boolean,
+) {
+    const isUpdate = findVDom(component);
+    // 上次移除的vdom
+    const nextVDom = component._nextVDom;
+    // 组件vdom
+    const initialVDom = isUpdate || nextVDom;
+    const firstVDom = isArray(initialVDom) ? (initialVDom as IVDom[])[0] : initialVDom as IVDom | undefined;
+    const baseParent = firstVDom && firstVDom.base && firstVDom.base.parentNode;
+    let cvdom: IVDom | IVDom[] | undefined;
+    const vchildren = component._children;
+    // 获取当前组件的子组件
+    const initialChildComponent = component._component;
+    const keyed: {[name: string]: any} = {};
+    const children = [];
+    for (let i = 0, len = vchildren.length; i < len; i++) {
+        const vchild = vchildren[i];
+        let child = null;
+        let key: string | null = null;
+        if (vchild.type === 0 && initialChildComponent) {
+            let _childComponent: Component<IBaseProps, IKeyValue>;
+            if (isArray(initialChildComponent)) {
+                _childComponent = (initialChildComponent as Array<Component<IBaseProps, IKeyValue>>)[vchild.index];
+            } else {
+                _childComponent = initialChildComponent as Component<IBaseProps, IKeyValue>;
+            }
+            if (_childComponent._key) {
+                key = _childComponent._key;
+            }
+            child = {
+                type: vchild.type,
+                value: _childComponent,
+            };
+        } else if (vchild.type === 1 && initialVDom) {
+            let _childVDom: IVDom;
+            if (isArray(initialVDom)) {
+                _childVDom = (initialVDom as IVDom[])[vchild.index];
+            } else {
+                _childVDom = initialVDom as IVDom;
+            }
+            if (typeof _childVDom.props === "object" && _childVDom.props.key) {
+                key = _childVDom.props.key as string;
+            }
+            child = {
+                type: vchild.type,
+                value: _childVDom,
+            };
+        }
+        if (child) {
+            if (key) {
+                keyed[key] = child;
+            } else {
+                children.push(child);
+            }
+        }
+    }
+    
+    let inst: Component<IBaseProps, IKeyValue> | undefined;
+    if (component.getChildContext) {
+        context = extend(context, component.getChildContext());
+    }
+    let toUnmount: Component<IKeyValue, IKeyValue> | undefined;
+    let vdom: IVDom | IVDom[] | undefined;
+    // 取出VNode的nodeName
+    const childComponent = rendered && typeof rendered === "object" && rendered.nodeName;
+
+    if (typeof childComponent === "function") {
+        // 如果是自定义组件
+
+        // if (component.child) {
+        //     component.child = undefined;
+        // }
+        // 获取VNode上的props
+        const childProps = getNodeProps(rendered as VNode);
+        inst = initialChildComponent;
+        if (inst && inst.constructor === childComponent && childProps.key === inst._key) {
+            // 子组件已存在且key未变化只改变props
+            setComponentProps(inst, childProps, SYNC_RENDER, context, false);
+        } else {
+            if (inst) {
+                // 设置到toUnmount等待unmount
+                toUnmount = inst;
+            }
+            // 新建Component
+            inst = createComponent(childComponent, childProps, context, (rendered as VNode).component, (rendered as VNode).context);
+            // 子组件索引保证下次相同子组件不会重新创建
+            component._component = inst;
+            // 设置好缓存dom
+            inst._nextVDom = inst._nextVDom || nextVDom;
+            // 设置父组件索引
+            inst._parentComponent = component;
+            // 设置props但是不进行render
+            setComponentProps(inst, childProps, NO_RENDER, context, false);
+            // 递归调用renderComponent保证子组件的子组件创建
+            renderComponent(inst, SYNC_RENDER, mountALL, true);
+        }
+        // 把子组件dom设置到base
+        vdom = findVDom(inst);
+    } else {
+        // 原生组件
+        // 获取原dom或缓存dom
+        cvdom = initialVDom as IVDom[] | IVDom;
+        // 把自定义子组件放到卸载，对应使用if分支控制自定义组件和原生组件
+        toUnmount = initialChildComponent;
+        if (toUnmount) {
+            // 如果存在说明上次渲染时是一个自定义组件
+            // 清理子组件索引
+            component._component = undefined;
+            // 清理vdom索引
+            cvdom = undefined;
+        }
+
+        if (initialVDom || opts === SYNC_RENDER) {
+            // 组件dom，缓存dom，同步渲染
+            if (cvdom && cvdom.component) {
+                // 清理component索引防止使用同一个component情况下却卸载了。
+                cvdom.component = undefined;
+                //
+                // const b: any = cbase;
+                // b._component = undefined;
+            }
+            // 渲染原生组件
+            vdom = diff(
+                // 原dom
+                cvdom,
+                // VNode
+                rendered,
+                context,
+                // 父级或者该原生组件，原dom不存在说明必须触发生命周期
+                mountALL || !isUpdate,
+                // 把组件挂载到缓存dom的父级
+                initialVDom && initialVDom.base && initialVDom.base.parentNode,
+                // 以原生组件这里执行说明是自定义组件的第一个原生组件
+                true,
+            );
+        }
+    }
+
+    if (initialVDom && vdom !== initialVDom && inst !== initialChildComponent) {
+        // 存在缓存dom，现dom和缓存dom不相同且新建过自定义子组件
+        // 获取当前组件缓存dom的父级dom
+        const baseParent = initialVDom.base && initialVDom.base.parentNode;
+        if (vdom && (vdom as IVDom).base && baseParent && (vdom as IVDom).base !== baseParent) {
+            // 替换到新dom
+            baseParent.replaceChild((vdom as IVDom).base as Element, initialVDom.base as Element);
+            if (!toUnmount) {
+                // 没有
+                initialVDom.component = undefined;
+                recollectNodeTree(initialVDom, false);
+            }
+        }
+    }
+    if (toUnmount) {
+        // 卸载无用的自定义组件
+        unmountComponent(toUnmount);
+    }
+    // 当前自定义组件的根dom
+    setVDom(component, (vdom as IVDom));
+    component.base = (vdom as IVDom).base;
+    if (vdom && !isChild) {
+        // 创建了dom且不是子组件渲染
+        let componentRef: Component<IKeyValue, IKeyValue> | undefined = component;
+        let t: Component<IKeyValue, IKeyValue> | undefined = component;
+        // 获取根自定义组件，有可能是一个子组件变化数据
+        while ((t = t._parentComponent)) {
+            componentRef = t;
+            setVDom(componentRef, (vdom as IVDom));
+            componentRef.base = (vdom as IVDom).base;
+        }
+        // const dom: any = vdom.base;
+        // 保证dom的上下文为根自定义组件
+        vdom.component = componentRef;
+        vdom.componentConstructor = componentRef.constructor;
+    }
+}
+
 /**
  * 执行render，diff或新建render
  * @param {Component} component
@@ -118,7 +299,7 @@ export function renderComponent(component: Component<any, any>, opts?: number, m
     // 获取组件state
     let state = component.state;
     // 获取组件context
-    let context = component.context;
+    const context = component.context;
     // 获取组件上一次的props没有取当前
     const previousProps = component._prevProps || props;
     // 获取组件上一次的state没有取当前
@@ -131,11 +312,8 @@ export function renderComponent(component: Component<any, any>, opts?: number, m
     const nextVDom = component._nextVDom;
     // 组件vdom
     const initialVDom = isUpdate || nextVDom;
-    // 获取当前组件的子组件
-    const initialChildComponent = component._component;
     // 略过dom更新标记
     let skip = false;
-    let cvdom: IVDom | undefined;
     if (isUpdate) {
         // 有dom元素在组件上说明是更新操作.
         // 把组件上的props，state，context都返回到更新前
@@ -179,127 +357,12 @@ export function renderComponent(component: Component<any, any>, opts?: number, m
     component._dirty = false;
 
     if (!skip) {
-        let rendered: childType;
-        // 当前组件的render函数返回的VNode
-        rendered = component.render(props, state, context);
+        const rendered: childType | childType[] = component.render(props, state, context);
+        if (isArray(rendered)) {
+
+        }
         //
-        let inst: Component<IKeyValue, IKeyValue> | undefined;
-        if (component.getChildContext) {
-            context = extend(context, component.getChildContext());
-        }
-        // 取出VNode的nodeName
-        const childComponent = rendered && typeof rendered === "object" && rendered.nodeName;
-        let toUnmount: Component<IKeyValue, IKeyValue> | undefined;
-        let vdom: IVDom | undefined;
-
-        if (typeof childComponent === "function") {
-            // 如果是自定义组件
-
-            // if (component.child) {
-            //     component.child = undefined;
-            // }
-            // 获取VNode上的props
-            const childProps = getNodeProps(rendered as VNode);
-            inst = initialChildComponent;
-            if (inst && inst.constructor === childComponent && childProps.key === inst._key) {
-                // 子组件已存在且key未变化只改变props
-                setComponentProps(inst, childProps, SYNC_RENDER, context, false);
-            } else {
-                if (inst) {
-                    // 设置到toUnmount等待unmount
-                    toUnmount = inst;
-                }
-                // 新建Component
-                inst = createComponent(childComponent, childProps, context, (rendered as VNode).component, (rendered as VNode).context);
-                // 子组件索引保证下次相同子组件不会重新创建
-                component._component = inst;
-                // 设置好缓存dom
-                inst._nextVDom = inst._nextVDom || nextVDom;
-                // 设置父组件索引
-                inst._parentComponent = component;
-                // 设置props但是不进行render
-                setComponentProps(inst, childProps, NO_RENDER, context, false);
-                // 递归调用renderComponent保证子组件的子组件创建
-                renderComponent(inst, SYNC_RENDER, mountALL, true);
-            }
-            // 把子组件dom设置到base
-            vdom = findVDom(inst);
-        } else {
-            // 原生组件
-            // 获取原dom或缓存dom
-            cvdom = initialVDom;
-            // 把自定义子组件放到卸载，对应使用if分支控制自定义组件和原生组件
-            toUnmount = initialChildComponent;
-            if (toUnmount) {
-                // 如果存在说明上次渲染时是一个自定义组件
-                // 清理子组件索引
-                component._component = undefined;
-                // 清理vdom索引
-                cvdom = undefined;
-            }
-
-            if (initialVDom || opts === SYNC_RENDER) {
-                // 组件dom，缓存dom，同步渲染
-                if (cvdom && cvdom.component) {
-                    // 清理component索引防止使用同一个component情况下却卸载了。
-                    cvdom.component = undefined;
-                    //
-                    // const b: any = cbase;
-                    // b._component = undefined;
-                }
-                // 渲染原生组件
-                vdom = diff(
-                    // 原dom
-                    cvdom,
-                    // VNode
-                    rendered,
-                    context,
-                    // 父级或者该原生组件，原dom不存在说明必须触发生命周期
-                    mountALL || !isUpdate,
-                    // 把组件挂载到缓存dom的父级
-                    initialVDom && initialVDom.base && initialVDom.base.parentNode,
-                    // 以原生组件这里执行说明是自定义组件的第一个原生组件
-                    true,
-                );
-            }
-        }
-
-        if (initialVDom && vdom !== initialVDom && inst !== initialChildComponent) {
-            // 存在缓存dom，现dom和缓存dom不相同且新建过自定义子组件
-            // 获取当前组件缓存dom的父级dom
-            const baseParent = initialVDom.base && initialVDom.base.parentNode;
-            if (vdom && vdom.base && baseParent && vdom.base !== baseParent) {
-                // 替换到新dom
-                baseParent.replaceChild(vdom.base, initialVDom.base as Element);
-                if (!toUnmount) {
-                    // 没有
-                    initialVDom.component = undefined;
-                    recollectNodeTree(initialVDom, false);
-                }
-            }
-        }
-        if (toUnmount) {
-            // 卸载无用的自定义组件
-            unmountComponent(toUnmount);
-        }
-        // 当前自定义组件的根dom
-        setVDom(component, (vdom as IVDom));
-        component.base = (vdom as IVDom).base;
-        if (vdom && !isChild) {
-            // 创建了dom且不是子组件渲染
-            let componentRef: Component<IKeyValue, IKeyValue> | undefined = component;
-            let t: Component<IKeyValue, IKeyValue> | undefined = component;
-            // 获取根自定义组件，有可能是一个子组件变化数据
-            while ((t = t._parentComponent)) {
-                componentRef = t;
-                setVDom(componentRef, (vdom as IVDom));
-                componentRef.base = (vdom as IVDom).base;
-            }
-            // const dom: any = vdom.base;
-            // 保证dom的上下文为根自定义组件
-            vdom.component = componentRef;
-            vdom.componentConstructor = componentRef.constructor;
-        }
+        
     }
     if (!isUpdate || mountALL) {
         // 新建dom的需要触发componentDidMount放入mounts等待生命周期触发
@@ -340,7 +403,7 @@ export function buildComponentFromVNode(
     vnode: VNode,
     context: IKeyValue,
     mountALL: boolean,
-): IVDom {
+): IVDom | IVDom[] {
     // 获取根组件缓存
     let c = vdom && vdom.component;
     const originalComponent = c;
