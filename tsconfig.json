@@ -1,7 +1,7 @@
 {
     "compilerOptions": {
       "module": "es2015", // 目标代码模块方式
-      "outDir": "build", // 输出目录
+      "outDir": "dist", // 输出目录
       "sourceMap": true,
       "target": "es5", // 目标代码平台
       "strict": true, // TS严格模式
@@ -11,9 +11,6 @@
       "node_modeles" // 不转换 node_modeles
     ],
     "files": [
-       "src/declaration.d.ts",
-       "src/zreact.ts",
-       "src/devtools.ts",
-       "src/compat.ts"
+       "src/index.ts"
     ]
 }

@@ -56,14 +56,7 @@ typings/
 
 # dotenv environment variables file
 .env
-/test/test.js
-/build/
-/test/coverage/
 /dist/
-/devtools.js
-/devtools.js.map
-/devtools-run.js
-/devtools-run.js.map
 /docs/
-*error.log
+*.log
 

@@ -5,7 +5,7 @@ const isProduction = process.env.NODE_ENV === 'production'
 const name = 'zreact'
 
 const config = Object.assign({
-    input: 'src/zreact.ts',
+    input: 'src/index.ts',
     output: isProduction ? [
         {
             name,
